@@ -1,8 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
 using System.Linq;
+using UnityEngine;
 
 public class MapManager : MonoBehaviour
 {
@@ -14,24 +14,52 @@ public class MapManager : MonoBehaviour
 
     private Dictionary<Vector2, Tile> _tiles;
 
-    private Vector2 agent;
+    private Vector2 agent, tempLoc;
 
-    public static bool done;
+    public static bool done, med, food, mapDone, nextPoint;
+    public static int totalTask, count;
 
-    public GameObject agentModel;
+    public GameObject agentModel, trainPanel, firstCam, robotModel;
 
-    public float eps = 0.9f, discount_factor = 0.9f, learning_rate =0.9f;
-    
+    public float eps = 0.9f, discount_factor = 0.9f, learning_rate = 0.9f;
+    int taskDone = 0;
+
+    bool once;
+
+    int[] SP = new int[999999];
+    Queue<Vector2> SPF = new Queue<Vector2>();
+    int i = 0, j =0;
+
 
     void Start()
     {
         GenerateGrid();
+        agentModel.transform.position = agent;
     }
 
     private void Update()
     {
-        if(done)
-            agentModel.transform.position = agent;
+
+
+    }
+
+    public void MedicineMode()
+    {
+        med = true;
+        food = false;
+    }
+
+    public void FoodMode()
+    {
+        med = false;
+        food = true;
+
+    }
+
+    public void WallMode()
+    {
+        med = false;
+        food = false;
     }
 
     void GenerateGrid()
@@ -49,13 +77,13 @@ public class MapManager : MonoBehaviour
                 bool isOffset = (x % 2 == 0 && y % 2 != 0) || (x % 2 != 0 && y % 2 == 0);
                 spawnedTile.Init(isOffset);
 
-                if (x == _width - 1 && y == _height - 1) spawnedTile.ownReward = 100;
+                //if (x == _width - 1 && y == _height - 1) spawnedTile.ownReward = 100;
 
                 _tiles[new Vector2(x, y)] = spawnedTile;
             }
         }
 
-        _cam.transform.position = new Vector3((float)_width / 2 - 0.5f, (float)_height / 2 - 0.5f, -10);
+        _cam.transform.position = new Vector3((float)_width / 2 + 0.7f, (float)_height / 2 - 0.5f, -10);
     }
 
     public Tile GetTileAtPosition(Vector2 pos)
@@ -66,41 +94,52 @@ public class MapManager : MonoBehaviour
 
     public void MapDone()
     {
-        done = true;
+        mapDone = true;
+        TrainAgent(Vector2.zero);
+        firstCam.SetActive(true);
+        robotModel.SetActive(true);
+        agentModel.GetComponent<SpriteRenderer>().enabled = false;
+    }
 
-        for (int i = 0; i <1000; i++)
+    public void TrainAgent(Vector2 startPos)
+    {
+        for (int i = 0; i < 1000; i++)
+        {
+            agent = startPos;
             while (!CheckTile(agent))
             {
                 int nextMove = NextMove(agent, eps);
-                Debug.Log(nextMove);
                 Vector2 lastLoc = agent;
-                Debug.Log(lastLoc);
                 agent = NextTile(agent, nextMove);
-                Debug.Log(agent);
                 float reward = GetTileAtPosition(agent).ownReward;
                 float oldQ = GetTileAtPosition(lastLoc).stepReWard[nextMove];
                 float diff = reward + (discount_factor * GetTileAtPosition(agent).stepReWard.Max()) - oldQ;
-
-
                 float newQ = oldQ + (learning_rate * diff);
                 GetTileAtPosition(lastLoc).stepReWard[nextMove] = newQ;
             }
-        Debug.Log("Done Training");
+        }
+        agent = startPos;
+        if (!once)
+        {
+            trainPanel.SetActive(true);
+            StartCoroutine(Disapear());
+            once = true;
+
+        }
     }
 
-    public void CalSP()
+    IEnumerator Disapear()
     {
-        ShortestPath();
-        Debug.Log("Done Cal");
-
+        yield return new WaitForSeconds(0.5f);
+        trainPanel.SetActive(false);
     }
 
 
     private bool CheckTile(Vector2 curLoc)
     {
-        if (GetTileAtPosition(curLoc).ownReward == -100) return true;
-        else return false;
-        
+        if (GetTileAtPosition(curLoc).ownReward == -1) return false;
+        else return true;
+
     }
 
     private int NextMove(Vector2 curLoc, float epsilon)
@@ -113,35 +152,121 @@ public class MapManager : MonoBehaviour
     {
         switch (nextMove)
         {
-            case 1: 
-                    if (curLoc.y < _width - 1) curLoc.y++;
+            case 0:
+                if (curLoc.y < _height - 1) curLoc.y++;
                 break;
-            case 2:   
-                    if (curLoc.y > 0) curLoc.y--;
+            case 1:
+                if (curLoc.y > 0) curLoc.y--;
                 break;
-            case 3:
-                    if (curLoc.x > 0) curLoc.x++;
+            case 2:
+                if (curLoc.x > 0) curLoc.x--;
                 break;
             default:
-                    if (curLoc.x < _height-1) curLoc.x++;
+                if (curLoc.x < _width - 1) curLoc.x++;
                 break;
         }
 
         return curLoc;
     }
 
-    private int[] ShortestPath()
+    public void CalSP()
     {
-        int[] SP = new int[500];
-        int i = 0;
+
+        while (taskDone < totalTask)
+        {
+            ShortestPath();
+            nextPoint = false;
+            if (totalTask > 1)
+            {
+                for (int x = 0; x < _width; x++)
+                {
+                    for (int y = 0; y < _height; y++)
+                    {
+                        GetTileAtPosition(new Vector2(x, y)).gameObject.GetComponent<Tile>().Reset();
+                    }
+                }
+                TrainAgent(tempLoc);
+            }
+        }
+
+        StartCoroutine(MoveAgent());
+        for (int k = 0; k<=i; k++)
+        {
+            Debug.Log(SP[k]);
+        }
+        //agent = agentModel.transform.position;
+        //StartCoroutine(MoveAgent());
+    }
+
+    private void ShortestPath()
+    {
+        //StartCoroutine(MoveAgent());
         while (!CheckTile(agent))
         {
             int nextMove = NextMove(agent, 1f);
+            GetTileAtPosition(agent).gameObject.GetComponent<Tile>().HighlightPath();
+            GetTileAtPosition(agent).gameObject.GetComponent<Tile>().ShowArrow(nextMove);
+            SPF.Enqueue(agent);
             agent = NextTile(agent, nextMove);
             SP[i] = nextMove;
             i++;
+            //agentModel.transform.position = agent;
+            //StartCoroutine(MoveAgent());
+        }
+        SPF.Enqueue(agent);
+        GetTileAtPosition(agent).gameObject.GetComponent<Tile>().HighlightPath();
+        GetTileAtPosition(agent).gameObject.GetComponent<Tile>().ownReward = -1;
+        taskDone++;
+        tempLoc = agent;
+    }
+
+
+    IEnumerator MoveAgent()
+    {
+        if (SPF.Count() != 0)
+        {
+            yield return new WaitForSeconds(0.1f);
+            Vector2 pos = SPF.Dequeue();
+            Debug.Log(pos);
+            agentModel.transform.position = pos;
+            StartCoroutine(MoveAgent());
+        }
+        else
+        {
+            StopAllCoroutines();
         }
 
-        return SP;
+
+        //if (nextPoint)
+        //{
+        //    GetTileAtPosition(agent).gameObject.GetComponent<Tile>().HighlightPath();
+        //    GetTileAtPosition(agent).gameObject.GetComponent<Tile>().ownReward = -1;
+        //    taskDone++;
+        //    tempLoc = agent;
+        //    StopAllCoroutines();
+        //}
+
+
+        //if (!CheckTile(agent))
+        //{
+        //    int nextMove = NextMove(agent, 1f);
+        //    GetTileAtPosition(agent).gameObject.GetComponent<Tile>().HighlightPath();
+        //    GetTileAtPosition(agent).gameObject.GetComponent<Tile>().ShowArrow(nextMove);
+        //    agent = NextTile(agent, nextMove);
+        //    SP[i] = nextMove;
+        //    i++;
+        //    agentModel.transform.position = agent;
+        //    yield return new WaitForSeconds(0.1f);
+        //    StartCoroutine(MoveAgent());
+        //}
+        //else
+        //{
+        //    nextPoint = true;
+        //    //yield return new WaitForSeconds(0f);
+        //    StopAllCoroutines();
+        //}
+
+
+
     }
 }
